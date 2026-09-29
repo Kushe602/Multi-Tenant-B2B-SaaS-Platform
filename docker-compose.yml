@@ -1,0 +1,111 @@
+# TenantForge -- full multi-service stack (gateway + 3 services + postgres + redis).
+#
+#   docker compose up --build
+#
+# Only the gateway is published (http://localhost:8000). The identity, tickets
+# and notifications services are internal and reachable only on the compose
+# network. Each service owns its own logical database (database-per-service).
+
+name: tenantforge
+
+# Secrets/signing are shared so JWTs and the internal handshake validate across
+# services. Override SECRET_KEY / INTERNAL_SECRET via a .env file or the shell.
+x-app-env: &app-env
+  SECRET_KEY: ${SECRET_KEY:-dev-only-insecure-secret-key-change-me-0123456789}
+  INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-only-internal-service-secret-change-me-01234}
+  REDIS_URL: redis://redis:6379/0
+  ENVIRONMENT: production
+
+x-healthcheck: &app-healthcheck
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+  interval: 10s
+  timeout: 3s
+  retries: 5
+  start_period: 15s
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tenantforge
+      POSTGRES_PASSWORD: tenantforge
+      POSTGRES_DB: tenantforge
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tenantforge"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  identity:
+    build:
+      context: .
+      dockerfile: identity_service/Dockerfile
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+asyncpg://tenantforge:tenantforge@postgres:5432/identity
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck: *app-healthcheck
+    restart: unless-stopped
+
+  tickets:
+    build:
+      context: .
+      dockerfile: tickets_service/Dockerfile
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+asyncpg://tenantforge:tenantforge@postgres:5432/tickets
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck: *app-healthcheck
+    restart: unless-stopped
+
+  notifications:
+    build:
+      context: .
+      dockerfile: notifications_service/Dockerfile
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+asyncpg://tenantforge:tenantforge@postgres:5432/notifications
+      EMAIL_DEMO_MODE: "true"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck: *app-healthcheck
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    environment:
+      <<: *app-env
+      IDENTITY_URL: http://identity:8000
+      TICKETS_URL: http://tickets:8000
+      NOTIFICATIONS_URL: http://notifications:8000
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: lax
+    ports:
+      - "8000:8000"
+    depends_on:
+      identity: { condition: service_healthy }
+      tickets: { condition: service_healthy }
+      notifications: { condition: service_healthy }
+    healthcheck: *app-healthcheck
+    restart: unless-stopped
+
+volumes:
+  pgdata:

@@ -1,0 +1,30 @@
+# Keep Docker build contexts small and reproducible.
+.venv/
+venv/
+env/
+
+__pycache__/
+*.py[cod]
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+.git/
+.github/
+.gitignore
+
+# Local demo databases and secrets
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+
+# Docs / tests are not needed inside runtime images
+tests/
+README.md
+LICENSE
+docker-compose.yml

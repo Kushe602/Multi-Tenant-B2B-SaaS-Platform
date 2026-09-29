@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" class="h-full bg-slate-50">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}TenantForge{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2" crossorigin="anonymous"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { brand: { 600: '#4f46e5', 700: '#4338ca' } } } } }
+  </script>
+</head>
+<body class="h-full text-slate-800">
+  <header class="border-b border-slate-200 bg-white">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+      <a href="/" class="flex items-center gap-2 font-semibold text-slate-900">
+        <span class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-white">TF</span>
+        TenantForge
+      </a>
+      <nav class="flex items-center gap-3 text-sm">
+        {% if principal %}
+          <span class="hidden sm:inline text-slate-500">{{ principal.email }} &middot; <span class="font-medium text-brand-700">{{ principal.role }}</span></span>
+          <a href="/app" class="text-slate-600 hover:text-slate-900">Dashboard</a>
+          <form action="/logout" method="post"><button class="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50">Log out</button></form>
+        {% else %}
+          <a href="/login" class="text-slate-600 hover:text-slate-900">Log in</a>
+          <a href="/signup" class="rounded-md bg-brand-600 px-3 py-1.5 text-white hover:bg-brand-700">Get started</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+  <main class="mx-auto max-w-6xl px-4 py-8">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

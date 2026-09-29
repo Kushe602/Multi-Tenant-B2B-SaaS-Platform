@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}TenantForge — Multi-tenant Helpdesk SaaS{% endblock %}
+{% block content %}
+<section class="grid gap-10 md:grid-cols-2 md:items-center">
+  <div>
+    <p class="mb-3 inline-block rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-brand-700">Multi-tenant · Microservices · Scalable API</p>
+    <h1 class="text-4xl font-bold tracking-tight text-slate-900">Customer support, isolated per tenant.</h1>
+    <p class="mt-4 text-lg text-slate-600">
+      TenantForge is a B2B helpdesk platform. Each organization signs up as a tenant with its own
+      users, roles and tickets — strictly isolated at the data layer and served by independent,
+      horizontally-scalable services.
+    </p>
+    <div class="mt-6 flex gap-3">
+      <a href="/signup" class="rounded-md bg-brand-600 px-4 py-2 text-white hover:bg-brand-700">Create a workspace</a>
+      <a href="/login" class="rounded-md border border-slate-300 px-4 py-2 hover:bg-white">Log in</a>
+    </div>
+    <p class="mt-4 text-sm text-slate-500">REST API available under <code class="rounded bg-slate-100 px-1">/api</code>. Interactive docs at <a class="text-brand-700 underline" href="/docs">/docs</a>.</p>
+  </div>
+  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Architecture</h2>
+    <pre class="overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs leading-relaxed text-slate-100">
+        Browser / API client
+                |
+          [  gateway  ]  (public)
+           /    |     \
+   identity  tickets  notifications
+      \        |        /
+       Postgres  +  Redis pub/sub</pre>
+    <ul class="mt-4 space-y-2 text-sm text-slate-600">
+      <li>· JWT sessions, bcrypt passwords, RBAC (owner / agent)</li>
+      <li>· Every row is tenant-scoped; cross-tenant access returns 404</li>
+      <li>· ticket.* events fan out over Redis to notifications</li>
+    </ul>
+  </div>
+</section>
+{% endblock %}
