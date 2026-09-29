@@ -1,33 +1,88 @@
+{% set status_styles = {
+  'open': 'bg-amber-100 text-amber-800',
+  'pending': 'bg-sky-100 text-sky-800',
+  'resolved': 'bg-emerald-100 text-emerald-800',
+  'closed': 'bg-slate-200 text-slate-700'
+} %}
+{% macro render_comment(c, ticket_id) %}
+<div class="rounded-md bg-slate-50 px-3 py-2 text-sm">
+  <p class="text-slate-700">{{ c.body }}</p>
+  <p class="mt-1 text-xs text-slate-400">by {{ c.author_user_id[:8] }}</p>
+  <details class="mt-1">
+    <summary class="cursor-pointer text-xs text-brand-700 hover:underline">Reply</summary>
+    <form class="mt-2 flex gap-2" hx-post="/app/tickets/{{ ticket_id }}/comments" hx-target="#ticket-detail" hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful) this.reset()">
+      <input type="hidden" name="parent_id" value="{{ c.id }}" />
+      <input name="body" required placeholder="Write a reply…" class="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-brand-600 focus:outline-none" />
+      <button class="rounded-md bg-brand-600 px-3 py-1 text-sm text-white hover:bg-brand-700">Send</button>
+    </form>
+  </details>
+  {% if c.children %}
+  <div class="mt-2 space-y-2 border-l-2 border-slate-200 pl-3">
+    {% for child in c.children %}{{ render_comment(child, ticket_id) }}{% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
 {% if ticket %}
 <div class="space-y-4">
   <div>
     <div class="flex items-start justify-between gap-2">
       <h3 class="text-base font-semibold text-slate-900">{{ ticket.subject }}</h3>
-      {% set color = 'bg-amber-100 text-amber-800' if ticket.status == 'open' else ('bg-sky-100 text-sky-800' if ticket.status == 'pending' else 'bg-emerald-100 text-emerald-800') %}
-      <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium {{ color }}">{{ ticket.status }}</span>
+      <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium {{ status_styles.get(ticket.status, 'bg-slate-100 text-slate-600') }}">{{ ticket.status }}</span>
     </div>
-    <p class="mt-1 text-xs text-slate-400">#{{ ticket.id[:8] }} · priority {{ ticket.priority }}</p>
+    <p class="mt-1 text-xs text-slate-400">
+      #{{ ticket.id[:8] }} · priority {{ ticket.priority }}
+      {% if ticket.category %}· {{ ticket.category }}{% endif %}
+      · {% if ticket.assignee_label %}assigned to @{{ ticket.assignee_label }}{% else %}unassigned{% endif %}
+    </p>
+    {% if ticket.tags %}
+    <div class="mt-2 flex flex-wrap gap-1">
+      {% for tag in ticket.tags %}<span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">{{ tag }}</span>{% endfor %}
+    </div>
+    {% endif %}
     {% if ticket.description %}<p class="mt-2 whitespace-pre-line text-sm text-slate-600">{{ ticket.description }}</p>{% endif %}
   </div>
 
-  <form class="flex items-center gap-2" hx-post="/app/tickets/{{ ticket.id }}/status" hx-target="#ticket-detail" hx-swap="innerHTML">
-    <label class="text-xs font-medium text-slate-500">Status</label>
-    <select name="status" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
-      <option value="open" {% if ticket.status == 'open' %}selected{% endif %}>open</option>
-      <option value="pending" {% if ticket.status == 'pending' %}selected{% endif %}>pending</option>
-      <option value="closed" {% if ticket.status == 'closed' %}selected{% endif %}>closed</option>
+  <!-- Workflow: status + priority + category -->
+  <form class="space-y-2 rounded-md border border-slate-200 p-3" hx-post="/app/tickets/{{ ticket.id }}/workflow" hx-target="#ticket-detail" hx-swap="innerHTML">
+    <div class="flex flex-wrap items-center gap-2">
+      <label class="text-xs font-medium text-slate-500">Status</label>
+      <select name="status" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+        {% for s in ['open', 'pending', 'resolved', 'closed'] %}
+        <option value="{{ s }}" {% if ticket.status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+      <label class="text-xs font-medium text-slate-500">Priority</label>
+      <select name="priority" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+        {% for p in ['low', 'normal', 'high', 'urgent'] %}
+        <option value="{{ p }}" {% if ticket.priority == p %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex items-center gap-2">
+      <input name="category" value="{{ ticket.category or '' }}" placeholder="Category" class="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-brand-600 focus:outline-none" />
+      <button class="rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50">Update</button>
+    </div>
+  </form>
+
+  <!-- Assignment -->
+  <form class="flex items-center gap-2" hx-post="/app/tickets/{{ ticket.id }}/assign" hx-target="#ticket-detail" hx-swap="innerHTML">
+    <label class="text-xs font-medium text-slate-500">Assignee</label>
+    <select name="assignee_user_id" class="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm">
+      <option value="">Unassigned</option>
+      {% for u in users %}
+      <option value="{{ u.id }}" {% if ticket.assignee_user_id == u.id %}selected{% endif %}>{{ u.name or u.email }}</option>
+      {% endfor %}
     </select>
-    <button class="rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50">Update</button>
+    <button class="rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50">Assign</button>
   </form>
 
   <div>
     <h4 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Comments</h4>
     <div class="space-y-2">
       {% for c in comments %}
-        <div class="rounded-md bg-slate-50 px-3 py-2 text-sm">
-          <p class="text-slate-700">{{ c.body }}</p>
-          <p class="mt-1 text-xs text-slate-400">by {{ c.author_user_id[:8] }}</p>
-        </div>
+        {{ render_comment(c, ticket.id) }}
       {% else %}
         <p class="text-sm text-slate-400">No comments yet.</p>
       {% endfor %}

@@ -29,6 +29,22 @@ def _passthrough(resp: httpx.Response) -> JSONResponse:
     return JSONResponse(content=content, status_code=resp.status_code)
 
 
+async def _is_tenant_user(request: Request, user_id: str) -> bool:
+    """True if ``user_id`` belongs to the caller's tenant (per the identity service).
+
+    ``/users`` is itself tenant-scoped from the caller's JWT, so this can only
+    ever confirm membership within the caller's own tenant.
+    """
+    resp = await clients.identity(request, "GET", "/users", token=get_token(request))
+    if resp.status_code >= 300:
+        return False
+    try:
+        users = resp.json()
+    except ValueError:
+        return False
+    return any(isinstance(u, dict) and u.get("id") == user_id for u in users)
+
+
 async def _auth_and_set_cookie(request: Request, path: str, payload: dict) -> Response:
     resp = await clients.identity(request, "POST", path, json=payload)
     out = _passthrough(resp)
@@ -97,6 +113,15 @@ async def api_create_ticket(
     )
 
 
+@router.get("/tickets/stats")
+async def api_ticket_stats(
+    request: Request, principal: Principal = Depends(require_principal)
+) -> Response:
+    return _passthrough(
+        await clients.tickets(request, "GET", "/tickets/stats", token=get_token(request))
+    )
+
+
 @router.get("/tickets/{ticket_id}")
 async def api_get_ticket(
     ticket_id: str, request: Request, principal: Principal = Depends(require_principal)
@@ -116,6 +141,33 @@ async def api_update_ticket(
     return _passthrough(
         await clients.tickets(
             request, "PATCH", f"/tickets/{ticket_id}", json=payload, token=get_token(request)
+        )
+    )
+
+
+@router.post("/tickets/{ticket_id}/assign")
+async def api_assign_ticket(
+    ticket_id: str,
+    request: Request,
+    payload: dict = Body(...),
+    principal: Principal = Depends(require_principal),
+) -> Response:
+    assignee = payload.get("assignee_user_id")
+    # Enforce "a user in the tenant": validate against identity before assigning.
+    # The tickets-service cannot see identity's DB, so this cross-service check
+    # lives at the gateway (which can). An unknown/foreign user id is rejected.
+    if assignee and not await _is_tenant_user(request, assignee):
+        return JSONResponse(
+            {"detail": "assignee is not a user in this tenant"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    return _passthrough(
+        await clients.tickets(
+            request,
+            "POST",
+            f"/tickets/{ticket_id}/assign",
+            json={"assignee_user_id": assignee},
+            token=get_token(request),
         )
     )
 

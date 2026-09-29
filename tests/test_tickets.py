@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from conftest import auth_headers, internal_headers
-from shared.topics import TICKET_COMMENTED, TICKET_CREATED, TICKET_UPDATED
+from shared.topics import TICKET_ASSIGNED, TICKET_COMMENTED, TICKET_CREATED, TICKET_UPDATED
 
 
 async def _agent_token(system, org="Acme", email="owner@acme.io"):
@@ -121,3 +121,166 @@ async def test_events_emitted_on_create_update_comment(system):
     assert TICKET_COMMENTED in topics
     # Every emitted event carries the tenant_id (used for downstream scoping).
     assert all("tenant_id" in payload for _, payload in system.bus.published)
+
+
+async def test_workflow_fields_category_tags_and_new_enum_values(system):
+    token, _ = await _agent_token(system)
+    created = await system.tickets.post(
+        "/tickets",
+        json={
+            "subject": "Escalated billing",
+            "priority": "urgent",
+            "category": "billing",
+            "tags": ["VIP", " vip ", "refund"],  # trimmed + case-insensitive dedupe
+        },
+        headers=auth_headers(token),
+    )
+    assert created.status_code == 201
+    t = created.json()
+    assert t["priority"] == "urgent"
+    assert t["category"] == "billing"
+    assert t["tags"] == ["VIP", "refund"]
+
+    upd = await system.tickets.patch(
+        f"/tickets/{t['id']}",
+        json={"status": "resolved", "category": "payments", "tags": ["escalated"]},
+        headers=auth_headers(token),
+    )
+    assert upd.status_code == 200
+    body = upd.json()
+    assert body["status"] == "resolved"
+    assert body["category"] == "payments"
+    assert body["tags"] == ["escalated"]
+
+
+async def test_filter_and_search(system):
+    token, user = await _agent_token(system)
+    high = (
+        await system.tickets.post(
+            "/tickets",
+            json={"subject": "Login fails", "description": "cannot sign in", "priority": "high"},
+            headers=auth_headers(token),
+        )
+    ).json()
+    await system.tickets.post(
+        "/tickets",
+        json={"subject": "Billing question", "priority": "low"},
+        headers=auth_headers(token),
+    )
+    await system.tickets.post(
+        "/tickets",
+        json={"subject": "Login slow", "description": "dashboard lag", "priority": "normal"},
+        headers=auth_headers(token),
+    )
+    # Assign one so the assignee filter has something to match.
+    await system.tickets.post(
+        f"/tickets/{high['id']}/assign",
+        json={"assignee_user_id": user["id"]},
+        headers=auth_headers(token),
+    )
+
+    by_priority = await system.tickets.get(
+        "/tickets", params={"priority_filter": "high"}, headers=auth_headers(token)
+    )
+    assert [t["subject"] for t in by_priority.json()] == ["Login fails"]
+
+    by_assignee = await system.tickets.get(
+        "/tickets", params={"assignee": user["id"]}, headers=auth_headers(token)
+    )
+    assert [t["subject"] for t in by_assignee.json()] == ["Login fails"]
+
+    search = await system.tickets.get(
+        "/tickets", params={"q": "login"}, headers=auth_headers(token)
+    )
+    assert {t["subject"] for t in search.json()} == {"Login fails", "Login slow"}
+
+    # Search also matches the description text.
+    desc = await system.tickets.get(
+        "/tickets", params={"q": "lag"}, headers=auth_headers(token)
+    )
+    assert [t["subject"] for t in desc.json()] == ["Login slow"]
+
+
+async def test_stats_counts_are_zero_filled_and_tenant_scoped(system):
+    token, _ = await _agent_token(system)
+    for priority in ("low", "normal", "high"):
+        await system.tickets.post(
+            "/tickets",
+            json={"subject": f"S {priority}", "priority": priority},
+            headers=auth_headers(token),
+        )
+    first = (await system.tickets.get("/tickets", headers=auth_headers(token))).json()[0]
+    await system.tickets.patch(
+        f"/tickets/{first['id']}", json={"status": "resolved"}, headers=auth_headers(token)
+    )
+
+    stats = await system.tickets.get("/tickets/stats", headers=auth_headers(token))
+    assert stats.status_code == 200
+    data = stats.json()
+    assert data["total"] == 3
+    # Every enum value present (zero-filled), not just the ones that occurred.
+    assert set(data["by_status"]) == {"open", "pending", "resolved", "closed"}
+    assert set(data["by_priority"]) == {"low", "normal", "high", "urgent"}
+    assert data["by_status"]["open"] == 2
+    assert data["by_status"]["resolved"] == 1
+    assert data["by_status"]["closed"] == 0
+    assert data["by_priority"]["high"] == 1
+    assert data["by_priority"]["urgent"] == 0
+
+
+async def test_threaded_comment_replies(system):
+    token, _ = await _agent_token(system)
+    tid = (
+        await system.tickets.post(
+            "/tickets", json={"subject": "Threaded"}, headers=auth_headers(token)
+        )
+    ).json()["id"]
+
+    root = await system.tickets.post(
+        f"/tickets/{tid}/comments", json={"body": "root"}, headers=auth_headers(token)
+    )
+    assert root.status_code == 201
+    root_id = root.json()["id"]
+
+    reply = await system.tickets.post(
+        f"/tickets/{tid}/comments",
+        json={"body": "a reply", "parent_id": root_id},
+        headers=auth_headers(token),
+    )
+    assert reply.status_code == 201
+    assert reply.json()["parent_id"] == root_id
+
+    # A parent_id that isn't a comment on this ticket is rejected.
+    bad = await system.tickets.post(
+        f"/tickets/{tid}/comments",
+        json={"body": "orphan", "parent_id": "does-not-exist"},
+        headers=auth_headers(token),
+    )
+    assert bad.status_code == 404
+
+
+async def test_assignment_emits_event_and_can_unassign(system):
+    token, user = await _agent_token(system)
+    tid = (
+        await system.tickets.post(
+            "/tickets", json={"subject": "Assign me"}, headers=auth_headers(token)
+        )
+    ).json()["id"]
+
+    assigned = await system.tickets.post(
+        f"/tickets/{tid}/assign",
+        json={"assignee_user_id": user["id"]},
+        headers=auth_headers(token),
+    )
+    assert assigned.status_code == 200
+    assert assigned.json()["assignee_user_id"] == user["id"]
+
+    assign_events = [p for t, p in system.bus.published if t == TICKET_ASSIGNED]
+    assert assign_events
+    assert assign_events[-1]["assignee_user_id"] == user["id"]
+
+    cleared = await system.tickets.post(
+        f"/tickets/{tid}/assign", json={"assignee_user_id": None}, headers=auth_headers(token)
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["assignee_user_id"] is None

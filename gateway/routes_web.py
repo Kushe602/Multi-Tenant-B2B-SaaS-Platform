@@ -119,12 +119,57 @@ async def logout(request: Request) -> Response:
 # --------------------------------------------------------------------------- #
 # Authenticated dashboard
 # --------------------------------------------------------------------------- #
+async def _fetch_users(request: Request, token: str | None) -> list[dict]:
+    """Tenant-scoped users (for assignee pickers). Empty list on any failure."""
+    resp = await clients.identity(request, "GET", "/users", token=token)
+    users = _json_or_none(resp) or []
+    return users if isinstance(users, list) else []
+
+
+def _user_label(users: list[dict], user_id: str | None) -> str | None:
+    """Human label (name or email) for an assignee id, if we know the user."""
+    if not user_id:
+        return None
+    for u in users:
+        if u.get("id") == user_id:
+            return u.get("name") or u.get("email") or user_id[:8]
+    return user_id[:8]
+
+
+def _comment_tree(comments: list[dict]) -> list[dict]:
+    """Turn a flat, chronologically-ordered comment list into a reply tree."""
+    nodes = {c["id"]: {**c, "children": []} for c in comments}
+    roots: list[dict] = []
+    for c in comments:
+        node = nodes[c["id"]]
+        parent_id = c.get("parent_id")
+        parent = nodes.get(parent_id) if parent_id else None
+        if parent is not None:
+            parent["children"].append(node)
+        else:
+            roots.append(node)
+    return roots
+
+
 @router.get("/app", response_class=HTMLResponse)
 async def dashboard(request: Request) -> Response:
     principal = get_principal_optional(request)
     if principal is None:
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
-    return templates.TemplateResponse(request, "app.html", {"principal": principal})
+    users = await _fetch_users(request, get_token(request))
+    return templates.TemplateResponse(
+        request, "app.html", {"principal": principal, "users": users}
+    )
+
+
+@router.get("/app/stats", response_class=HTMLResponse)
+async def stats_partial(request: Request) -> Response:
+    principal = get_principal_optional(request)
+    if principal is None:
+        return _redirect_to_login()
+    resp = await clients.tickets(request, "GET", "/tickets/stats", token=get_token(request))
+    stats = _json_or_none(resp) or {"total": 0, "by_status": {}, "by_priority": {}}
+    return templates.TemplateResponse(request, "partials/stats.html", {"stats": stats})
 
 
 @router.get("/app/tickets", response_class=HTMLResponse)
@@ -132,12 +177,17 @@ async def tickets_partial(request: Request) -> Response:
     principal = get_principal_optional(request)
     if principal is None:
         return _redirect_to_login()
+    users = await _fetch_users(request, get_token(request))
     resp = await clients.tickets(
         request, "GET", "/tickets", token=get_token(request), params=dict(request.query_params)
     )
     tickets = _json_or_none(resp) or []
+    for t in tickets:
+        t["assignee_label"] = _user_label(users, t.get("assignee_user_id"))
     return templates.TemplateResponse(
-        request, "partials/tickets.html", {"tickets": tickets, "principal": principal}
+        request,
+        "partials/tickets.html",
+        {"tickets": tickets, "principal": principal, "filters": dict(request.query_params)},
     )
 
 
@@ -147,23 +197,37 @@ async def create_ticket_web(
     subject: str = Form(...),
     description: str = Form(""),
     priority: str = Form("normal"),
+    category: str = Form(""),
+    tags: str = Form(""),
 ) -> Response:
     principal = get_principal_optional(request)
     if principal is None:
         return _redirect_to_login()
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
     await clients.tickets(
         request,
         "POST",
         "/tickets",
         token=get_token(request),
-        json={"subject": subject, "description": description, "priority": priority},
+        json={
+            "subject": subject,
+            "description": description,
+            "priority": priority,
+            "category": category or None,
+            "tags": tag_list,
+        },
     )
+    users = await _fetch_users(request, get_token(request))
     resp = await clients.tickets(request, "GET", "/tickets", token=get_token(request))
     tickets = _json_or_none(resp) or []
+    for t in tickets:
+        t["assignee_label"] = _user_label(users, t.get("assignee_user_id"))
     out = templates.TemplateResponse(
-        request, "partials/tickets.html", {"tickets": tickets, "principal": principal}
+        request,
+        "partials/tickets.html",
+        {"tickets": tickets, "principal": principal, "filters": {}},
     )
-    # Nudge the notifications panel to refresh (a ticket.created event fired).
+    # Nudge the notifications + stats panels to refresh (a ticket.created event fired).
     out.headers["HX-Trigger"] = "ticketsChanged"
     return out
 
@@ -181,32 +245,70 @@ async def ticket_detail(request: Request, ticket_id: str) -> Response:
             status_code=status.HTTP_404_NOT_FOUND,
         )
     ticket = _json_or_none(tresp)
+    users = await _fetch_users(request, token)
+    if ticket is not None:
+        ticket["assignee_label"] = _user_label(users, ticket.get("assignee_user_id"))
     cresp = await clients.tickets(request, "GET", f"/tickets/{ticket_id}/comments", token=token)
     comments = _json_or_none(cresp) or []
     return templates.TemplateResponse(
         request,
         "partials/ticket_detail.html",
-        {"ticket": ticket, "comments": comments, "principal": principal},
+        {
+            "ticket": ticket,
+            "comments": _comment_tree(comments),
+            "users": users,
+            "principal": principal,
+        },
     )
 
 
-@router.post("/app/tickets/{ticket_id}/status", response_class=HTMLResponse)
-async def update_status_web(
-    request: Request, ticket_id: str, status_value: str = Form(..., alias="status")
+@router.post("/app/tickets/{ticket_id}/workflow", response_class=HTMLResponse)
+async def update_workflow_web(
+    request: Request,
+    ticket_id: str,
+    status_value: str = Form(..., alias="status"),
+    priority: str = Form(...),
+    category: str = Form(""),
 ) -> Response:
     principal = get_principal_optional(request)
     if principal is None:
         return _redirect_to_login()
-    token = get_token(request)
     await clients.tickets(
-        request, "PATCH", f"/tickets/{ticket_id}", token=token, json={"status": status_value}
+        request,
+        "PATCH",
+        f"/tickets/{ticket_id}",
+        token=get_token(request),
+        json={"status": status_value, "priority": priority, "category": category or None},
     )
-    return await ticket_detail(request, ticket_id)
+    out = await ticket_detail(request, ticket_id)
+    out.headers["HX-Trigger"] = "ticketsChanged"
+    return out
+
+
+@router.post("/app/tickets/{ticket_id}/assign", response_class=HTMLResponse)
+async def assign_ticket_web(
+    request: Request, ticket_id: str, assignee_user_id: str = Form("")
+) -> Response:
+    principal = get_principal_optional(request)
+    if principal is None:
+        return _redirect_to_login()
+    # The assignee dropdown is populated from this tenant's users, and the ticket
+    # itself is tenant-scoped downstream, so a foreign user can't be selected here.
+    await clients.tickets(
+        request,
+        "POST",
+        f"/tickets/{ticket_id}/assign",
+        token=get_token(request),
+        json={"assignee_user_id": assignee_user_id or None},
+    )
+    out = await ticket_detail(request, ticket_id)
+    out.headers["HX-Trigger"] = "ticketsChanged"
+    return out
 
 
 @router.post("/app/tickets/{ticket_id}/comments", response_class=HTMLResponse)
 async def add_comment_web(
-    request: Request, ticket_id: str, body: str = Form(...)
+    request: Request, ticket_id: str, body: str = Form(...), parent_id: str = Form("")
 ) -> Response:
     principal = get_principal_optional(request)
     if principal is None:
@@ -216,9 +318,11 @@ async def add_comment_web(
         "POST",
         f"/tickets/{ticket_id}/comments",
         token=get_token(request),
-        json={"body": body},
+        json={"body": body, "parent_id": parent_id or None},
     )
-    return await ticket_detail(request, ticket_id)
+    out = await ticket_detail(request, ticket_id)
+    out.headers["HX-Trigger"] = "ticketsChanged"
+    return out
 
 
 @router.get("/app/notifications", response_class=HTMLResponse)

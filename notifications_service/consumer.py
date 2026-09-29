@@ -41,6 +41,19 @@ def _render(payload: dict) -> tuple[str, str, str]:
             f"New comment: {subject}",
             f"A new comment was added to ticket #{ticket_short}.",
         )
+    if event == "assigned":
+        assignee = payload.get("assignee_user_id")
+        if assignee:
+            return (
+                "ticket.assigned",
+                f"Ticket assigned: {subject}",
+                f"Ticket #{ticket_short} was assigned to you.",
+            )
+        return (
+            "ticket.assigned",
+            f"Ticket unassigned: {subject}",
+            f"Ticket #{ticket_short} was unassigned.",
+        )
     return (
         "ticket.updated",
         f"Ticket updated: {subject}",

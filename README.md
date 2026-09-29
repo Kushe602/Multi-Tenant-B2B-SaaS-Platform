@@ -34,8 +34,13 @@ suite (see [Tenant isolation](#tenant-isolation)).
 - **Layered auth** — bcrypt password hashing, HS256 JWTs, RBAC, and a
   service-to-service internal-secret handshake so only the gateway can reach the
   internal services.
-- **Event-driven design** — `ticket.*` domain events on a Redis pub/sub bus,
-  consumed asynchronously into in-app notifications.
+- **Event-driven design** — `ticket.created` / `ticket.updated` / `ticket.assigned`
+  / `ticket.commented` domain events on a Redis pub/sub bus, consumed
+  asynchronously into in-app notifications (assignment notifies the assignee).
+- **Helpdesk workflow** — ticket status (`open`/`pending`/`resolved`/`closed`),
+  priority (`low`/`normal`/`high`/`urgent`), category + tags, assignment to a
+  tenant user, list filtering + text search, and a per-tenant dashboard with
+  counts by status and priority.
 - **Testability** — a dual-mode infrastructure layer makes the entire
   cross-service flow (web UI + REST + events) testable in-process, deterministically.
 - **Production shape** — pinned deps, `ruff` lint, per-service Dockerfiles,
@@ -85,7 +90,7 @@ fields.
 | --- | --- | --- |
 | `gateway` | Public edge: web UI + REST API, session cookie, fan-out | *(stateless)* |
 | `identity_service` | Tenants, users, auth (bcrypt + JWT), RBAC, invites | `tenants`, `users`, `invites` |
-| `tickets_service` | Tickets + comments; emits `ticket.*` events | `tickets`, `comments` |
+| `tickets_service` | Tickets + threaded comments, workflow, assignment, filtering/search, per-tenant stats; emits `ticket.*` events | `tickets`, `comments` |
 | `notifications_service` | Consumes events into in-app notifications | `notifications` |
 | `shared/` | Reusable library (config, db, security, events, deps) | — |
 
@@ -130,8 +135,9 @@ Two details that matter:
 > `B` (`B != A`) can never read or mutate `R`, and `R` never appears in any list
 > returned to `B`. The response is indistinguishable from `R` not existing.
 
-This is enforced on reads, updates, comments, and list endpoints, and verified
-by [`tests/test_tickets_isolation.py`](tests/test_tickets_isolation.py).
+This is enforced on reads, updates, comments, list, stats, search, and
+assignment endpoints, and verified by
+[`tests/test_tickets_isolation.py`](tests/test_tickets_isolation.py).
 
 ### Alternatives (and when to graduate to them)
 
@@ -281,11 +287,13 @@ public surface; each service exposes its own OpenAPI in dev).
 | `GET  /api/me` | Current principal |
 | `GET  /api/users` | Users in the caller's tenant |
 | `POST /api/invites` | Invite a teammate *(owner only)* |
-| `GET  /api/tickets` | List tenant tickets (`?status_filter=open\|pending\|closed`) |
-| `POST /api/tickets` | Create a ticket → emits `ticket.created` |
+| `GET  /api/tickets` | List tenant tickets; filter/search via `?status_filter=`, `?priority_filter=`, `?assignee=`, `?q=` |
+| `POST /api/tickets` | Create a ticket (subject, priority, category, tags…) → emits `ticket.created` |
+| `GET  /api/tickets/stats` | Per-tenant counts by status + priority (dashboard) |
 | `GET  /api/tickets/{id}` | Fetch one ticket (`404` if not in tenant) |
-| `PATCH /api/tickets/{id}` | Update status/assignee → emits `ticket.updated` |
-| `GET/POST /api/tickets/{id}/comments` | List/add comments → emits `ticket.commented` |
+| `PATCH /api/tickets/{id}` | Update status/priority/category/tags → emits `ticket.updated` |
+| `POST /api/tickets/{id}/assign` | Assign to a tenant user (gateway validates membership) → emits `ticket.assigned` |
+| `GET/POST /api/tickets/{id}/comments` | List/add comments, incl. threaded replies (`parent_id`) → emits `ticket.commented` |
 | `GET  /api/notifications` | Tenant-scoped in-app notifications |
 | `POST /api/notifications/{id}/read` | Mark one read |
 
@@ -297,7 +305,7 @@ The gateway also serves a server-rendered web UI (HTMX + Jinja2 + Tailwind) at
 ## Testing
 
 ```bash
-pytest            # 29 tests, all in zero-config demo mode
+pytest            # 40 tests, all in zero-config demo mode
 ruff check .      # lint
 ```
 
@@ -310,10 +318,10 @@ tested deterministically without Docker.
 | File | Covers |
 | --- | --- |
 | `tests/test_identity.py` | Signup, login, RBAC, invites, JWT claims |
-| `tests/test_tickets.py` | Ticket lifecycle, comments, auth layers, event emission |
+| `tests/test_tickets.py` | Lifecycle, workflow (status/priority/category/tags), filtering + search, stats, threaded comments, assignment, auth layers, event emission |
 | `tests/test_tickets_isolation.py` | **Tenant isolation (headline security property)** |
-| `tests/test_notifications.py` | Event consumption, tenant-scoped reads, unread/mark-read |
-| `tests/test_gateway_integration.py` | End-to-end via the gateway (UI + API + events) |
+| `tests/test_notifications.py` | Event consumption (incl. targeted assignment notifications), tenant-scoped reads, unread/mark-read |
+| `tests/test_gateway_integration.py` | End-to-end via the gateway (UI + API + events, stats/search/assignment) |
 
 ### Tenant isolation
 
@@ -325,10 +333,14 @@ tested deterministically without Docker.
 - `test_tenant_cannot_read_another_tenants_comments`
 - `test_list_never_returns_another_tenants_tickets`
 - `test_tenant_scope_comes_from_token_not_a_forged_id`
+- `test_stats_never_count_another_tenants_tickets`
+- `test_search_never_returns_another_tenants_tickets`
+- `test_tenant_cannot_assign_another_tenants_ticket`
 
 `tests/test_gateway_integration.py`:
 
 - `test_tenant_isolation_through_the_gateway`
+- `test_gateway_rejects_cross_tenant_assignee`
 
 ---
 

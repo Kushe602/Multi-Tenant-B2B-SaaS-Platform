@@ -11,18 +11,23 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 STATUS_OPEN = "open"
 STATUS_PENDING = "pending"
+STATUS_RESOLVED = "resolved"
 STATUS_CLOSED = "closed"
-VALID_STATUSES = frozenset({STATUS_OPEN, STATUS_PENDING, STATUS_CLOSED})
+VALID_STATUSES = frozenset({STATUS_OPEN, STATUS_PENDING, STATUS_RESOLVED, STATUS_CLOSED})
+# Deterministic display order (used by the per-tenant dashboard stats).
+STATUS_ORDER = (STATUS_OPEN, STATUS_PENDING, STATUS_RESOLVED, STATUS_CLOSED)
 
 PRIORITY_LOW = "low"
 PRIORITY_NORMAL = "normal"
 PRIORITY_HIGH = "high"
-VALID_PRIORITIES = frozenset({PRIORITY_LOW, PRIORITY_NORMAL, PRIORITY_HIGH})
+PRIORITY_URGENT = "urgent"
+VALID_PRIORITIES = frozenset({PRIORITY_LOW, PRIORITY_NORMAL, PRIORITY_HIGH, PRIORITY_URGENT})
+PRIORITY_ORDER = (PRIORITY_LOW, PRIORITY_NORMAL, PRIORITY_HIGH, PRIORITY_URGENT)
 
 
 def _uuid() -> str:
@@ -42,6 +47,8 @@ class Ticket(Base):
     __table_args__ = (
         # Composite index: listing tickets is always "by tenant, newest first".
         Index("ix_tickets_tenant_created", "tenant_id", "created_at"),
+        # Supports the tenant-scoped status/priority filters and the dashboard.
+        Index("ix_tickets_tenant_status", "tenant_id", "status"),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
@@ -50,6 +57,9 @@ class Ticket(Base):
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     status: Mapped[str] = mapped_column(String(16), default=STATUS_OPEN, nullable=False)
     priority: Mapped[str] = mapped_column(String(16), default=PRIORITY_NORMAL, nullable=False)
+    # Free-form single category and a list of tags (JSON works on SQLite + Postgres).
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     requester_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     assignee_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_by: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -70,6 +80,10 @@ class Comment(Base):
     tenant_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     ticket_id: Mapped[str] = mapped_column(
         String(32), ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    # Self-referential parent for threaded replies; NULL => a top-level comment.
+    parent_id: Mapped[str | None] = mapped_column(
+        String(32), ForeignKey("comments.id", ondelete="CASCADE"), index=True, nullable=True
     )
     author_user_id: Mapped[str] = mapped_column(String(32), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)

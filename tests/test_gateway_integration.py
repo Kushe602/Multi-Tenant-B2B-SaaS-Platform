@@ -97,3 +97,61 @@ async def test_web_dashboard_redirects_when_anonymous(system):
     resp = await system.gateway.get("/app")
     assert resp.status_code == 303
     assert resp.headers["location"] == "/login"
+
+
+async def test_api_stats_search_and_assignment_through_the_gateway(system):
+    gw = system.new_gateway_client()
+    signup = await gw.post(
+        "/api/auth/signup",
+        json={"org_name": "Acme", "email": "owner@acme.io", "password": "password123"},
+    )
+    assert signup.status_code == 201
+    owner_id = signup.json()["user"]["id"]
+
+    findme = (await gw.post("/api/tickets", json={"subject": "Findme please"})).json()
+    await gw.post("/api/tickets", json={"subject": "Other thing", "priority": "high"})
+
+    # Dashboard stats aggregate this tenant's tickets.
+    stats = await gw.get("/api/tickets/stats")
+    assert stats.status_code == 200
+    assert stats.json()["total"] == 2
+    assert stats.json()["by_priority"]["high"] == 1
+
+    # Search flows straight through to the tickets API.
+    hit = await gw.get("/api/tickets", params={"q": "findme"})
+    assert [t["subject"] for t in hit.json()] == ["Findme please"]
+    assert (await gw.get("/api/tickets", params={"q": "nomatch"})).json() == []
+
+    # Assigning to a real tenant user succeeds.
+    ok = await gw.post(
+        f"/api/tickets/{findme['id']}/assign", json={"assignee_user_id": owner_id}
+    )
+    assert ok.status_code == 200
+    assert ok.json()["assignee_user_id"] == owner_id
+
+    # Assigning to someone who is not a user in this tenant is rejected at the gateway.
+    bad = await gw.post(
+        f"/api/tickets/{findme['id']}/assign", json={"assignee_user_id": "not-a-real-user-000"}
+    )
+    assert bad.status_code == 400
+
+
+async def test_gateway_rejects_cross_tenant_assignee(system):
+    org_a = system.new_gateway_client()
+    org_b = system.new_gateway_client()
+    a_signup = await org_a.post(
+        "/api/auth/signup",
+        json={"org_name": "Acme", "email": "a@acme.io", "password": "password123"},
+    )
+    await org_b.post(
+        "/api/auth/signup",
+        json={"org_name": "Beta", "email": "b@beta.io", "password": "password123"},
+    )
+    a_owner_id = a_signup.json()["user"]["id"]
+
+    b_ticket = (await org_b.post("/api/tickets", json={"subject": "Beta ticket"})).json()
+    # Org B tries to assign its ticket to a user from org A -> not a tenant user -> 400.
+    resp = await org_b.post(
+        f"/api/tickets/{b_ticket['id']}/assign", json={"assignee_user_id": a_owner_id}
+    )
+    assert resp.status_code == 400

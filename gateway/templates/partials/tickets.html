@@ -1,3 +1,9 @@
+{% set status_styles = {
+  'open': 'bg-amber-100 text-amber-800',
+  'pending': 'bg-sky-100 text-sky-800',
+  'resolved': 'bg-emerald-100 text-emerald-800',
+  'closed': 'bg-slate-200 text-slate-700'
+} %}
 {% if tickets %}
   {% for t in tickets %}
   <button type="button"
@@ -5,10 +11,18 @@
           hx-get="/app/tickets/{{ t.id }}" hx-target="#ticket-detail" hx-swap="innerHTML">
     <span class="min-w-0">
       <span class="block truncate text-sm font-medium text-slate-800">{{ t.subject }}</span>
-      <span class="block text-xs text-slate-400">#{{ t.id[:8] }} · {{ t.priority }}</span>
+      <span class="block text-xs text-slate-400">
+        #{{ t.id[:8] }} · {{ t.priority }}
+        {% if t.category %}· {{ t.category }}{% endif %}
+        {% if t.assignee_label %}· @{{ t.assignee_label }}{% endif %}
+      </span>
+      {% if t.tags %}
+      <span class="mt-1 flex flex-wrap gap-1">
+        {% for tag in t.tags %}<span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{{ tag }}</span>{% endfor %}
+      </span>
+      {% endif %}
     </span>
-    {% set color = 'bg-amber-100 text-amber-800' if t.status == 'open' else ('bg-sky-100 text-sky-800' if t.status == 'pending' else 'bg-emerald-100 text-emerald-800') %}
-    <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium {{ color }}">{{ t.status }}</span>
+    <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium {{ status_styles.get(t.status, 'bg-slate-100 text-slate-600') }}">{{ t.status }}</span>
   </button>
   {% endfor %}
 {% else %}

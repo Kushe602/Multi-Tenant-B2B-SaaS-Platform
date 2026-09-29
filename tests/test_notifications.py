@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from conftest import auth_headers
-from shared.topics import TICKET_CREATED, TICKET_UPDATED
+from shared.topics import TICKET_ASSIGNED, TICKET_CREATED, TICKET_UPDATED
 
 
 def _event(tenant_id: str, ticket_id: str, event: str = "created", subject: str = "Subj") -> dict:
@@ -84,3 +84,19 @@ async def test_cannot_mark_read_across_tenants(system):
         f"/notifications/{note['id']}/read", headers=auth_headers(b_token)
     )
     assert resp.status_code == 404
+
+
+async def test_assignment_event_creates_targeted_notification(system):
+    payload = _event("tenantA", "t-assign", event="assigned", subject="Please handle")
+    payload["assignee_user_id"] = "assignee-1"
+    await system.bus.publish(TICKET_ASSIGNED, payload)
+
+    token = system.token(user_id="assignee-1", tenant_id="tenantA")
+    resp = await system.notifications.get("/notifications", headers=auth_headers(token))
+    assert resp.status_code == 200
+    items = resp.json()
+    assigned = [n for n in items if n["type"] == "ticket.assigned"]
+    assert len(assigned) == 1
+    # The notification is targeted at the assignee (used for per-user delivery).
+    assert assigned[0]["user_id"] == "assignee-1"
+    assert assigned[0]["ticket_id"] == "t-assign"
