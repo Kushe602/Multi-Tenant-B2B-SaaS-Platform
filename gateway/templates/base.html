@@ -1,36 +1,52 @@
 <!doctype html>
-<html lang="en" class="h-full bg-slate-50">
+<html lang="en" class="h-full">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#090d18" />
+  <meta name="color-scheme" content="dark" />
   <title>{% block title %}TenantForge{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2" crossorigin="anonymous"></script>
-  <script>
-    tailwind.config = { theme: { extend: { colors: { brand: { 600: '#4f46e5', 700: '#4338ca' } } } } }
-  </script>
+  <script>tailwind.config = { theme: { extend: { colors: { brand: { 600: '#8b7cff', 700: '#7667ed' } } } } }</script>
+  <style>
+    :root{color-scheme:dark;--page:#090d18;--surface:#131b2d;--line:rgba(148,163,184,.18);--text:#e8eef9;--muted:#9ba9bf;--accent:#8b7cff}
+    *{box-sizing:border-box}html{background:var(--page);scroll-behavior:smooth}
+    body{min-height:100%;color:var(--text);background:radial-gradient(ellipse at 12% 0%,rgba(91,76,220,.17),transparent 34rem),radial-gradient(ellipse at 92% 8%,rgba(14,165,233,.08),transparent 30rem),var(--page)}
+    body .bg-white,body .bg-slate-50,body .bg-slate-100{background-color:var(--surface)!important;color:var(--text)}
+    body .text-slate-900,body .text-slate-800,body .text-slate-700{color:var(--text)!important}
+    body .text-slate-600,body .text-slate-500,body .text-slate-400{color:var(--muted)!important}
+    body [class*="border-slate-"]{border-color:var(--line)!important}
+    body .bg-brand-600{background-color:var(--accent)!important}body .hover\\:bg-brand-700:hover{background-color:#a69aff!important}
+    body .bg-indigo-100{background-color:rgba(139,124,255,.15)!important}body .text-brand-700{color:#c4bbff!important}
+    body .hover\\:bg-slate-50:hover{background-color:rgba(148,163,184,.08)!important}
+    a,button,input,textarea,select{transition:color .18s ease,background-color .18s ease,border-color .18s ease,box-shadow .18s ease}
+    a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid #a69aff;outline-offset:3px}
+    input,textarea,select{background-color:#0e1627;color:var(--text);border-color:var(--line)}
+    ::selection{background:rgba(139,124,255,.35)}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
+  </style>
 </head>
-<body class="h-full text-slate-800">
-  <header class="border-b border-slate-200 bg-white">
-    <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-      <a href="/" class="flex items-center gap-2 font-semibold text-slate-900">
-        <span class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-white">TF</span>
-        TenantForge
+<body class="min-h-full text-slate-100 antialiased">
+  <header class="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
+    <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+      <a href="/" class="flex items-center gap-3 font-semibold tracking-tight text-slate-900">
+        <span class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 text-sm font-bold text-white">TF</span>
+        TenantForge <span class="hidden text-xs font-medium text-slate-500 sm:inline">MULTI-TENANT HELPDESK</span>
       </a>
       <nav class="flex items-center gap-3 text-sm">
         {% if principal %}
-          <span class="hidden sm:inline text-slate-500">{{ principal.email }} &middot; <span class="font-medium text-brand-700">{{ principal.role }}</span></span>
+          <span class="hidden sm:inline text-slate-500">{{ principal.email }} · <span class="font-medium text-brand-700">{{ principal.role }}</span></span>
           <a href="/app" class="text-slate-600 hover:text-slate-900">Dashboard</a>
-          <form action="/logout" method="post"><button class="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50">Log out</button></form>
+          <form action="/logout" method="post"><button class="rounded-lg border border-slate-300 px-3 py-2 hover:bg-slate-50">Log out</button></form>
         {% else %}
-          <a href="/login" class="text-slate-600 hover:text-slate-900">Log in</a>
-          <a href="/signup" class="rounded-md bg-brand-600 px-3 py-1.5 text-white hover:bg-brand-700">Get started</a>
+          <a href="/login" class="rounded-lg px-3 py-2 text-slate-600 hover:text-slate-900">Log in</a>
+          <a href="/signup" class="rounded-lg bg-brand-600 px-4 py-2 font-semibold text-white hover:bg-brand-700">Get started</a>
         {% endif %}
       </nav>
     </div>
   </header>
-  <main class="mx-auto max-w-6xl px-4 py-8">
-    {% block content %}{% endblock %}
-  </main>
+  <main class="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">{% block content %}{% endblock %}</main>
+  <footer class="border-t border-slate-800 px-4 py-5 text-center text-xs text-slate-500">TenantForge · Tenant-scoped helpdesk workflows and service boundaries.</footer>
 </body>
 </html>
