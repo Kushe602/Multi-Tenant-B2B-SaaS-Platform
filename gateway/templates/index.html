@@ -1,36 +1,47 @@
 {% extends "base.html" %}
 {% block title %}TenantForge — Multi-tenant Helpdesk SaaS{% endblock %}
 {% block content %}
-<section class="grid gap-10 md:grid-cols-2 md:items-center">
+<section class="grid items-center gap-10 py-8 md:grid-cols-[1.1fr_.9fr] md:py-14">
   <div>
-    <p class="mb-3 inline-block rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-brand-700">Multi-tenant · Microservices · Scalable API</p>
-    <h1 class="text-4xl font-bold tracking-tight text-slate-900">Customer support, isolated per tenant.</h1>
-    <p class="mt-4 text-lg text-slate-600">
-      TenantForge is a B2B helpdesk platform. Each organization signs up as a tenant with its own
-      users, roles and tickets — strictly isolated at the data layer and served by independent,
-      horizontally-scalable services.
-    </p>
-    <div class="mt-6 flex gap-3">
-      <a href="/signup" class="rounded-md bg-brand-600 px-4 py-2 text-white hover:bg-brand-700">Create a workspace</a>
-      <a href="/login" class="rounded-md border border-slate-300 px-4 py-2 hover:bg-white">Log in</a>
+    <p class="mb-4 inline-flex items-center gap-2 rounded-full border border-indigo-400/20 bg-indigo-500/10 px-3 py-1.5 text-xs font-semibold text-indigo-200">MULTI-TENANT · MICROSERVICES · REST API</p>
+    <h1 class="max-w-2xl text-4xl font-extrabold leading-tight tracking-tight text-slate-900 sm:text-5xl">Customer support, <span class="text-indigo-300">isolated by design.</span></h1>
+    <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-600">TenantForge is a B2B helpdesk platform where each organization manages its own users, roles, and support tickets. A gateway coordinates independent services while tenant scope is derived from the authenticated session.</p>
+    <div class="mt-7 flex flex-wrap gap-3">
+      <a href="/signup" class="rounded-xl bg-brand-600 px-5 py-3 font-semibold text-white shadow-lg shadow-indigo-950/30 hover:bg-brand-700">Create a workspace <span aria-hidden="true">→</span></a>
+      <a href="/login" class="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700 hover:bg-slate-50">Log in</a>
     </div>
-    <p class="mt-4 text-sm text-slate-500">REST API available under <code class="rounded bg-slate-100 px-1">/api</code>. Interactive docs at <a class="text-brand-700 underline" href="/docs">/docs</a>.</p>
+    <p class="mt-4 text-sm text-slate-500">REST API under <code class="rounded-md border border-slate-700 bg-slate-900 px-2 py-1">/api</code> · Interactive API documentation at <a class="font-medium text-indigo-300 underline underline-offset-4" href="/docs">/docs</a>.</p>
   </div>
-  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-    <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Architecture</h2>
-    <pre class="overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs leading-relaxed text-slate-100">
-        Browser / API client
-                |
-          [  gateway  ]  (public)
-           /    |     \
-   identity  tickets  notifications
-      \        |        /
-       Postgres  +  Redis pub/sub</pre>
-    <ul class="mt-4 space-y-2 text-sm text-slate-600">
-      <li>· JWT sessions, bcrypt passwords, RBAC (owner / agent)</li>
-      <li>· Every row is tenant-scoped; cross-tenant access returns 404</li>
-      <li>· ticket.* events fan out over Redis to notifications</li>
-    </ul>
+  <div class="rounded-3xl border border-slate-700 bg-slate-900/80 p-5 shadow-2xl shadow-black/20 sm:p-6">
+    <div class="flex items-center justify-between"><h2 class="text-sm font-semibold uppercase tracking-[.16em] text-slate-400">Service topology</h2><span class="rounded-full bg-emerald-400/10 px-2.5 py-1 text-xs text-emerald-300">Gateway entry</span></div>
+    <div class="mt-5 rounded-xl border border-indigo-400/30 bg-indigo-500/10 p-4 text-center"><p class="font-mono text-sm font-semibold">Browser / API client</p><p class="mt-1 text-xs text-slate-400">Authenticated requests</p></div>
+    <div class="mx-auto h-6 w-px bg-slate-600"></div>
+    <div class="rounded-xl border border-indigo-400/30 bg-indigo-500/10 p-4 text-center"><p class="font-mono text-sm font-semibold">Public gateway · :8000</p><p class="mt-1 text-xs text-slate-400">Session validation · Web UI · API proxy</p></div>
+    <div class="mx-auto h-6 w-px bg-slate-600"></div>
+    <div class="grid grid-cols-3 gap-2 text-center">
+      <div class="rounded-xl border border-slate-700 bg-slate-950 p-3"><p class="text-xs font-semibold">Identity</p><p class="mt-1 text-[10px] text-slate-500">Tenants · RBAC</p></div>
+      <div class="rounded-xl border border-slate-700 bg-slate-950 p-3"><p class="text-xs font-semibold">Tickets</p><p class="mt-1 text-[10px] text-slate-500">Cases · comments</p></div>
+      <div class="rounded-xl border border-slate-700 bg-slate-950 p-3"><p class="text-xs font-semibold">Notifications</p><p class="mt-1 text-[10px] text-slate-500">Event consumers</p></div>
+    </div>
+    <p class="mt-4 text-xs leading-5 text-slate-500">Conceptual diagram based on the documented service layout; it is not a live health monitor.</p>
+  </div>
+</section>
+<section class="border-t border-slate-800 py-12">
+  <div class="mb-7"><p class="text-xs font-bold uppercase tracking-[.2em] text-indigo-300">Platform capabilities</p><h2 class="mt-3 text-2xl font-bold tracking-tight">Built for clear boundaries and useful workflows</h2></div>
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    {% set features = [
+      ("Tenant isolation", "Organization scope is derived from a signed JWT and enforced on data access; cross-tenant access is designed to be denied."),
+      ("Role-based access", "Owner and agent roles separate administrative actions from day-to-day ticket work."),
+      ("Ticket lifecycle", "Filter and search tickets, set status and priority, assign agents, and add comments."),
+      ("Event-driven updates", "Ticket domain events feed in-app notifications through the event bus."),
+      ("Service boundaries", "Gateway, identity, tickets, and notifications are separated into independently deployable services."),
+      ("Developer access", "Explore the REST API through the interactive OpenAPI documentation at /docs.")
+    ] %}
+    {% for title, description in features %}
+    <article class="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 transition hover:-translate-y-0.5 hover:border-indigo-400/40">
+      <h3 class="font-semibold">{{ title }}</h3><p class="mt-2 text-sm leading-6 text-slate-400">{{ description }}</p>
+    </article>
+    {% endfor %}
   </div>
 </section>
 {% endblock %}
