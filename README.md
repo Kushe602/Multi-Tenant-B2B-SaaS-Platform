@@ -48,6 +48,10 @@ suite (see [Tenant isolation](#tenant-isolation)).
 
 ---
 
+## Interface guide
+
+The interface refresh is documented here: [UI guide](docs/UI_GUIDE.md). The guide includes the screen overview and a local verification checklist.
+
 ## Architecture
 
 ```
